@@ -3,6 +3,7 @@ import os
 import platform
 import socket
 import subprocess
+import time
 import wave
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -72,6 +73,19 @@ def _git_head():
         return "-"
 
 
+_HEAD_TTL_SEC = 5.0
+_head_cache = {"value": None, "at": 0.0}
+
+
+def git_head():
+    """커밋 해시. 재시작 없이 갱신되도록 짧게 캐시한다(폴링이 1초 간격이므로)."""
+    now = time.monotonic()
+    if _head_cache["value"] is None or now - _head_cache["at"] >= _HEAD_TTL_SEC:
+        _head_cache["value"] = _git_head()
+        _head_cache["at"] = now
+    return _head_cache["value"]
+
+
 def _format_duration(seconds):
     seconds = int(seconds)
     if seconds >= 3600:
@@ -126,7 +140,7 @@ def collect(port):
         "os": "%s %s" % (platform.system(), platform.release()),
         "python": platform.python_version(),
         "git_url": _git_url(),
-        "git_head": _git_head(),
+        "git_head": git_head(),
         "subscribe": "/motion_group/command, /motion_group/event",
         "publish": "없음 (구독 전용)",
     }

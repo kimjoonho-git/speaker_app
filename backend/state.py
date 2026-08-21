@@ -283,7 +283,7 @@ class AppState:
             },
             "files": config.list_sounds(cfg["audio"]["sounds_dir"]),
             "last_trigger": self.last_trigger,
-            "system": self.system,
+            "system": {**self.system, "git_head": sysinfo.git_head()},
             "wav": sysinfo.wav_info(path),
             "stereo_converted": bool(path) and audio_prep.channels_of(path) == 1,
             "stats": self._stats(),
