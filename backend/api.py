@@ -2,6 +2,8 @@
 import os
 import urllib.parse
 
+import sysinfo
+
 from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
@@ -53,6 +55,8 @@ def create_app(state):
     # ---- 프론트엔드 ---------------------------------------------------
     @app.get("/")
     def index():
+        # 새로고침할 때마다 커밋 해시를 다시 읽는다 (폴링에서는 읽지 않는다)
+        sysinfo.invalidate_head()
         return _serve("index.html")
 
     @app.get("/app.js")

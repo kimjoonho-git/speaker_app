@@ -3,7 +3,6 @@ import os
 import platform
 import socket
 import subprocess
-import time
 import wave
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -73,17 +72,20 @@ def _git_head():
         return "-"
 
 
-_HEAD_TTL_SEC = 5.0
-_head_cache = {"value": None, "at": 0.0}
+_head_cache = {"value": None}
 
 
 def git_head():
-    """커밋 해시. 재시작 없이 갱신되도록 짧게 캐시한다(폴링이 1초 간격이므로)."""
-    now = time.monotonic()
-    if _head_cache["value"] is None or now - _head_cache["at"] >= _HEAD_TTL_SEC:
+    """커밋 해시. 값은 캐시하고, 페이지를 새로 열 때만 다시 읽는다.
+    프론트가 1초마다 폴링하므로 매번 git을 부르지 않는다."""
+    if _head_cache["value"] is None:
         _head_cache["value"] = _git_head()
-        _head_cache["at"] = now
     return _head_cache["value"]
+
+
+def invalidate_head():
+    """다음 조회 때 커밋 해시를 다시 읽게 한다. 페이지 로드 시 호출된다."""
+    _head_cache["value"] = None
 
 
 def _format_duration(seconds):
