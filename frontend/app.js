@@ -179,6 +179,7 @@ function renderInfo(s) {
     ["group", "시스템"],
     ["OS", sys.os],
     ["Python", sys.python],
+    ["소스 코드", sys.git_url, true],
   ];
   const dl = $("info");
   dl.innerHTML = "";

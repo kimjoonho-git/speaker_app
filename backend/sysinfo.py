@@ -32,6 +32,27 @@ def _iface():
     return "-"
 
 
+def _git_url():
+    """저장소 원격 주소. 앱 동작에는 관여하지 않으며 표시용이다."""
+    try:
+        out = subprocess.run(["git", "-C", APP_DIR, "remote", "get-url", "origin"],
+                             capture_output=True, text=True, timeout=2)
+        if out.returncode != 0:
+            return "-"
+        url = out.stdout.strip()
+    except Exception:
+        return "-"
+    if not url:
+        return "-"
+    # SSH 형식(git@host:owner/repo)을 브라우저로 열 수 있는 형태로 바꾼다
+    if url.startswith("git@"):
+        host, _, path = url[4:].partition(":")
+        url = "https://%s/%s" % (host, path)
+    if url.endswith(".git"):
+        url = url[:-4]
+    return url
+
+
 def _format_duration(seconds):
     seconds = int(seconds)
     if seconds >= 3600:
@@ -85,6 +106,7 @@ def collect(port):
         "rmw": os.environ.get("RMW_IMPLEMENTATION", "rmw_fastrtps_cpp (기본값)"),
         "os": "%s %s" % (platform.system(), platform.release()),
         "python": platform.python_version(),
+        "git_url": _git_url(),
         "subscribe": "/motion_group/command, /motion_group/event",
         "publish": "없음 (구독 전용)",
     }
