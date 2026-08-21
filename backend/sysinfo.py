@@ -3,6 +3,7 @@ import os
 import platform
 import socket
 import subprocess
+import time
 import wave
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,6 +31,30 @@ def _iface():
     except Exception:
         pass
     return "-"
+
+
+_net_cache = {"at": 0.0, "value": ("127.0.0.1", "-")}
+NET_CACHE_SEC = 5.0
+
+
+def network(force=False):
+    """현재 기본 경로의 (IP, 인터페이스). 없으면 ("127.0.0.1", "-").
+
+    상태 폴링이 1초 주기이므로 ip 명령을 매번 띄우지 않도록 잠깐 캐시한다.
+    """
+    now = time.time()
+    if not force and now - _net_cache["at"] < NET_CACHE_SEC:
+        return _net_cache["value"]
+    value = (_lan_ip(), _iface())
+    _net_cache["at"] = now
+    _net_cache["value"] = value
+    return value
+
+
+def network_ready(force=False):
+    """DDS가 붙을 수 있는 네트워크가 있는지. loopback만 있으면 False."""
+    ip, iface = network(force)
+    return iface != "-" and not ip.startswith("127.")
 
 
 def _git_url():

@@ -87,3 +87,13 @@ code { background: #f0f2f4; padding: 2px 6px; border-radius: 4px; font-size: 12.
 .vol input[type=range] { width: 220px; }
 .volnum { font-size: 13px; color: #4a5158; min-width: 42px; font-variant-numeric: tabular-nums; }
 input[type=file] { font-size: 13px; max-width: 260px; }
+
+/* 연동 시작 결과 — 첫 시작 성공/실패를 화면에서 바로 알 수 있게 한다 */
+.dds-state {
+  font-size: 13px; margin: 10px 0 0; padding: 9px 12px;
+  border-radius: 6px; border-left: 3px solid #cbd2d8;
+  background: #f4f6f8; color: #4a5158;
+}
+.dds-state.on  { background: #f0fdf4; border-left-color: #16a34a; color: #14663a; }
+.dds-state.wait{ background: #fffbeb; border-left-color: #d97706; color: #854d0e; }
+.dds-state.err { background: #fef2f2; border-left-color: #dc2626; color: #b42318; }

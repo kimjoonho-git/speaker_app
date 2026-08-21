@@ -42,6 +42,37 @@ const DDS_LABEL = {
 
 const PLAYBACK_LABEL = { idle: "대기", playing: "재생 중", paused: "일시정지" };
 
+function fmtSec(sec) {
+  const n = Number(sec) || 0;
+  if (n < 60) return n + "초";
+  const m = Math.floor(n / 60);
+  return m + "분 " + (n % 60) + "초";
+}
+
+// 첫 시작이 성공했는지와, 모션 PC가 보이는지는 서로 다른 문제다.
+// 부팅 직후 랜이 늦어 시작 자체가 실패한 경우를 "신호 대기"와 구분해서 보여준다.
+function ddsState(s) {
+  if (s.mode !== "dds") return ["단독 모드입니다. 트리거는 받지 않습니다.", ""];
+  const init = s.dds_init || {};
+  const target = "도메인 " + init.domain_id + " / 그룹 " + init.group_id;
+  const where = init.iface && init.ip ? " · " + init.iface + " " + init.ip : "";
+  if (init.ok === false) {
+    return ["시작 실패 — " + (init.error || s.dds_error || "원인 미확인") +
+            " → [다시 연결]을 누르세요", "err"];
+  }
+  if (init.ok !== true) {
+    return ["연동을 시작하는 중입니다… (" + target + ")", "wait"];
+  }
+  if (s.dds_status === "error") {
+    return ["시작 후 오류 — " + (s.dds_error || "원인 미확인"), "err"];
+  }
+  if (s.dds_status === "connected") {
+    return ["시작 성공 · 모션 PC 연결됨 — " + target + where, "on"];
+  }
+  return ["시작 성공 · 모션 PC 신호 대기 중 (" + fmtSec(init.elapsed) + " 경과) — " +
+          target + where, "wait"];
+}
+
 function render(s) {
   const cfg = s.config;
   const isDds = s.mode === "dds";
@@ -50,8 +81,11 @@ function render(s) {
   const info = DDS_LABEL[s.dds_status] || ["-", ""];
   const badge = $("dds-badge");
   badge.className = "badge " + info[1];
+  const initFailed = isDds && s.dds_init && s.dds_init.ok === false;
+  if (initFailed) badge.className = "badge err";
   badge.textContent = isDds
-    ? "DDS " + info[0] + " (도메인 " + cfg.domain_id + " / " + cfg.group_id + ")"
+    ? (initFailed ? "DDS 시작 실패" : "DDS " + info[0]) +
+      " (도메인 " + cfg.domain_id + " / " + cfg.group_id + ")"
     : "단독 모드";
 
   // 모드
@@ -65,6 +99,11 @@ function render(s) {
     modeHint = "DDS 오류: " + s.dds_error;
   }
   $("mode-hint").textContent = modeHint;
+
+  const st = ddsState(s);
+  const stEl = $("dds-state");
+  stEl.className = "dds-state " + st[1];
+  stEl.textContent = st[0];
 
   // 설정
   setValue($("domain_id"), cfg.domain_id);
@@ -227,6 +266,11 @@ $("btn-apply-dds").addEventListener("click", async () => {
     group_id: $("group_id").value,
   });
   if (ok) toast("연동 설정을 저장했습니다");
+  poll();
+});
+
+$("btn-reconnect-dds").addEventListener("click", async () => {
+  if (await api("/api/dds/restart")) toast("연동을 다시 연결합니다");
   poll();
 });
 

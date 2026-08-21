@@ -67,6 +67,14 @@ class AppState:
             self.log.add("단독 모드로 전환")
         return True, ""
 
+    def restart_dds(self):
+        """웹에서 누르는 다시 연결. 부팅 시 랜이 늦어 실패한 경우의 복구 수단."""
+        if self.cfg["mode"] != MODE_DDS:
+            return False, "연동 모드에서만 사용할 수 있습니다"
+        self.log.add("연동 다시 연결")
+        self._start_dds()
+        return True, ""
+
     # ---- 설정 -------------------------------------------------------
     def update_config(self, patch):
         cfg = self.cfg
@@ -264,10 +272,14 @@ class AppState:
     def snapshot(self):
         cfg = self.cfg
         path = config.resolve_file(cfg)
+        # 부팅 직후에는 랜이 늦게 올라와 기동 시 수집한 IP가 loopback으로 굳는다.
+        # 화면에는 항상 현재 값을 보여준다.
+        ip, iface = sysinfo.network()
         return {
             "mode": cfg["mode"],
             "dds_status": self.dds.status if cfg["mode"] == MODE_DDS else "off",
             "dds_error": self.dds.error,
+            "dds_init": self.dds.init if cfg["mode"] == MODE_DDS else None,
             "playback": self.player.state,
             "standalone_running": self.standalone.is_running(),
             "config": {
@@ -283,7 +295,9 @@ class AppState:
             },
             "files": config.list_sounds(cfg["audio"]["sounds_dir"]),
             "last_trigger": self.last_trigger,
-            "system": {**self.system, "git_head": sysinfo.git_head()},
+            "system": {**self.system, "git_head": sysinfo.git_head(),
+                       "ip": ip, "interface": iface,
+                       "web_url": "http://%s:%d" % (ip, int(cfg["web"]["port"]))},
             "wav": sysinfo.wav_info(path),
             "stereo_converted": bool(path) and audio_prep.channels_of(path) == 1,
             "stats": self._stats(),

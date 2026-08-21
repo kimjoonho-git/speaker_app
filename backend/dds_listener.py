@@ -10,6 +10,8 @@ import threading
 import time
 from collections import deque
 
+import sysinfo
+
 TOPIC = "/motion_group/command"
 EVENT_TOPIC = "/motion_group/event"
 
@@ -21,6 +23,12 @@ OFF = "off"
 CONNECTING = "connecting"
 CONNECTED = "connected"
 ERROR = "error"
+
+# 부팅 직후에는 Wi-Fi DHCP보다 이 앱이 먼저 뜬다. 네트워크가 없는 상태로
+# rclpy를 초기화하면 참가자가 loopback에만 묶이고, FastDDS는 참가자 생성 시점에
+# 인터페이스를 한 번만 열거하므로 나중에 랜이 올라와도 상대를 영구히 못 찾는다.
+# 그래서 초기화 전에 기본 경로가 잡힐 때까지 기다린다.
+NET_WAIT_SEC = 30
 
 
 class DdsListener:
@@ -38,6 +46,12 @@ class DdsListener:
         self._domain_id = 0
         self._seen = deque(maxlen=500)
         self._seen_set = set()
+        # 첫 시작(및 재시작) 결과 — 웹에서 성공/실패를 그대로 보여주기 위한 값
+        self._init_ok = None        # None=시도 전, True=성공, False=실패
+        self._init_error = ""
+        self._bound_ip = ""
+        self._bound_iface = ""
+        self._started_at = 0.0
 
     # ---- 조회 -------------------------------------------------------
     @property
@@ -50,10 +64,34 @@ class DdsListener:
         with self._lock:
             return self._error
 
+    @property
+    def init(self):
+        """첫 연동 시도의 결과 묶음. 웹 표시용."""
+        with self._lock:
+            elapsed = time.time() - self._started_at if self._started_at else 0.0
+            return {
+                "ok": self._init_ok,
+                "error": self._init_error,
+                "ip": self._bound_ip,
+                "iface": self._bound_iface,
+                "elapsed": int(elapsed),
+                "domain_id": self._domain_id,
+                "group_id": self._group_id,
+            }
+
     def _set_status(self, status, error=""):
         with self._lock:
             self._status = status
             self._error = error
+
+    def _fail(self, message):
+        """시작 실패를 상태와 로그에 함께 남긴다."""
+        with self._lock:
+            self._status = ERROR
+            self._error = message
+            self._init_ok = False
+            self._init_error = message
+        self._log.add("DDS 시작 실패: %s" % message)
 
     # ---- 제어 -------------------------------------------------------
     def start(self, domain_id, group_id, on_trigger, on_stop=None, watch_stop=False):
@@ -82,8 +120,31 @@ class DdsListener:
         self._group_id = str(group_id)
 
     # ---- 내부 -------------------------------------------------------
+    def _wait_network(self, stop_event):
+        """기본 경로가 잡힐 때까지 최대 NET_WAIT_SEC 기다린다. (ip, iface) 반환."""
+        deadline = time.time() + NET_WAIT_SEC
+        waited = False
+        while True:
+            ip, iface = sysinfo.network(force=True)
+            if iface != "-" and not ip.startswith("127."):
+                if waited:
+                    self._log.add("네트워크 확인됨 (%s %s)" % (iface, ip))
+                return ip, iface
+            if stop_event.is_set() or time.time() >= deadline:
+                return ip, iface
+            if not waited:
+                waited = True
+                self._log.add("네트워크 대기 중 (최대 %d초)" % NET_WAIT_SEC)
+            stop_event.wait(1.0)
+
     def _run(self, stop_event):
         self._set_status(CONNECTING)
+        with self._lock:
+            self._init_ok = None
+            self._init_error = ""
+            self._bound_ip = ""
+            self._bound_iface = ""
+            self._started_at = time.time()
         rclpy = None
         context = None
         node = None
@@ -98,6 +159,13 @@ class DdsListener:
             from motion_coordination_interfaces.msg import GroupCommand, GroupEvent
 
             rclpy = _rclpy
+            ip, iface = self._wait_network(stop_event)
+            if stop_event.is_set():
+                return
+            if iface == "-" or ip.startswith("127."):
+                self._fail("네트워크가 없어 DDS를 시작하지 못했습니다 "
+                           "(%d초 대기 후 포기, 랜/Wi-Fi 확인 후 재시작 필요)" % NET_WAIT_SEC)
+                return
             context = Context()
             rclpy.init(context=context, domain_id=self._domain_id)
             # 발자국 최소화: rosout 로그 발행과 파라미터 서비스를 끈다.
@@ -124,9 +192,14 @@ class DdsListener:
 
             executor = SingleThreadedExecutor(context=context)
             executor.add_node(node)
-            self._log.add("DDS 리스너 시작 (도메인 %d / 그룹 %s%s)"
-                          % (self._domain_id, self._group_id,
-                             ", 정지신호 수신" if self._watch_stop else ""))
+            with self._lock:
+                self._init_ok = True
+                self._init_error = ""
+                self._bound_ip = ip
+                self._bound_iface = iface
+            self._log.add("DDS 시작 성공 — 도메인 %d / 그룹 %s / %s %s%s"
+                          % (self._domain_id, self._group_id, iface, ip,
+                             " / 정지신호 수신" if self._watch_stop else ""))
 
             last_check = 0.0
             was_connected = False
@@ -141,12 +214,10 @@ class DdsListener:
                         self._log.add("모션 PC 연결됨" if connected else "모션 PC 연결 끊김")
                         was_connected = connected
         except ImportError as exc:
-            self._set_status(ERROR, "ROS 환경이 로드되지 않았습니다 (%s)" % exc)
-            self._log.add("DDS 시작 실패: ROS 환경 미로드 (%s)" % exc)
+            self._fail("ROS 환경이 로드되지 않았습니다 (%s)" % exc)
             return
         except Exception as exc:
-            self._set_status(ERROR, str(exc))
-            self._log.add("DDS 오류: %s" % exc)
+            self._fail(str(exc))
             return
         finally:
             try:

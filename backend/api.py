@@ -184,6 +184,11 @@ def create_app(state):
         ok, message = state.stop_playback()
         return _result(ok, message)
 
+    @app.post("/api/dds/restart")
+    def dds_restart():
+        ok, message = state.restart_dds()
+        return _result(ok, message)
+
     @app.post("/api/test")
     def test():
         ok, message = state.test_play()
