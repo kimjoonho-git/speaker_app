@@ -180,6 +180,7 @@ function renderInfo(s) {
     ["OS", sys.os],
     ["Python", sys.python],
     ["소스 코드", sys.git_url, true],
+    ["커밋", sys.git_head, true],
   ];
   const dl = $("info");
   dl.innerHTML = "";

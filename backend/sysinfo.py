@@ -53,6 +53,25 @@ def _git_url():
     return url
 
 
+def _git_head():
+    """현재 체크아웃된 커밋. 배포된 버전을 확인할 때 쓴다."""
+    try:
+        out = subprocess.run(["git", "-C", APP_DIR, "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=2)
+        if out.returncode != 0:
+            return "-"
+        head = out.stdout.strip()
+        if not head:
+            return "-"
+        dirty = subprocess.run(["git", "-C", APP_DIR, "status", "--porcelain"],
+                               capture_output=True, text=True, timeout=3)
+        if dirty.returncode == 0 and dirty.stdout.strip():
+            head += " (커밋 안 된 수정 있음)"
+        return head
+    except Exception:
+        return "-"
+
+
 def _format_duration(seconds):
     seconds = int(seconds)
     if seconds >= 3600:
@@ -107,6 +126,7 @@ def collect(port):
         "os": "%s %s" % (platform.system(), platform.release()),
         "python": platform.python_version(),
         "git_url": _git_url(),
+        "git_head": _git_head(),
         "subscribe": "/motion_group/command, /motion_group/event",
         "publish": "없음 (구독 전용)",
     }
