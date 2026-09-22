@@ -23,7 +23,18 @@ ROS 2 Humble 모션 제어 시스템(`motion_web`)의 DDS 트리거를 **구독�
 - `~/ros2_ws` 에 `motion_coordination_interfaces` 빌드 완료
 - ALSA (`aplay`)
 
-## 설치
+## 설치 — 새 PC 기준 순서대로
+
+### 1. ROS 2 Humble 메시지 빌드 (연동 모드 필수)
+
+```bash
+cd ~/ros2_ws
+colcon build --packages-select motion_coordination_interfaces
+```
+
+이게 없으면 DDS 연동이 안 된다. ROS 2 Humble 자체가 없으면 먼저 설치한다.
+
+### 2. 프로그램 받기 + 파이썬 패키지
 
 ```bash
 git clone <이 저장소> ~/speaker_app
@@ -31,33 +42,88 @@ cd ~/speaker_app
 pip3 install -r requirements.txt
 ```
 
-메시지 정의 빌드 (연동 모드용):
+### 3. 사운드 장치 독점 (**빼먹으면 소리가 전혀 안 난다**)
 
 ```bash
-cd ~/ros2_ws
-colcon build --packages-select motion_coordination_interfaces
+./deploy/setup-audio.sh
 ```
 
-음성 파일을 `sounds/` 에 넣고 `config/speaker.yaml` 의 `audio.file_path` 를 맞춘다.
-(용량 때문에 wav 파일은 저장소에 포함하지 않는다. 웹 UI에서 업로드해도 된다.)
+이 앱은 `aplay`로 ALSA 장치를 직접 연다. PulseAudio가 같은 장치를 붙잡고 있으면
+`Device or resource busy`로 실패해 **소리가 한 번도 나지 않는다.**
+스크립트가 PulseAudio와 speech-dispatcher를 봉인해 장치를 앱 전용으로 만든다.
+(데스크톱 소리는 나지 않게 된다 — 의도한 동작이다)
 
-## 실행
+실행이 끝나면 그 PC의 사운드 카드 목록이 출력된다. **카드 번호는 PC마다 다르다.**
 
-```bash
-./run.sh
+```
+card 1: Generic_1 [HD-Audio Generic], device 0: CX20632 Analog
+        ^                                       ^
+        plughw:1,0
 ```
 
-브라우저에서 `http://<이 PC의 IP>:8100` 접속.
+번호가 다르면 `config/speaker.yaml` 의 `audio.device` 를 고친다. 웹 UI 설정에서 바꿔도 된다.
 
-## 자동 시작 (systemd user service)
+### 4. 음원 파일 넣기
+
+**wav 파일은 저장소에 없다.** 용량 때문에 제외되어 있어 `git clone` 으로 딸려오지 않는다.
+USB나 `scp` 로 `sounds/` 에 직접 넣거나, 앱을 띄운 뒤 **웹 UI에서 업로드**한다.
+
+### 5. 자동 시작 등록 (**빼먹으면 재부팅해도 안 뜬다**)
 
 ```bash
 mkdir -p ~/.config/systemd/user
 cp deploy/speaker-app.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now speaker-app
-sudo loginctl enable-linger $USER   # 로그아웃 후에도 유지
+sudo loginctl enable-linger $USER
 ```
+
+마지막 `enable-linger` 가 핵심이다. 이것이 없으면 **로그인해야만** 앱이 뜬다.
+등록해 두면 전원만 켜도 자동으로 올라온다.
+
+### 6. 확인
+
+```bash
+systemctl --user status speaker-app
+```
+
+브라우저에서 `http://<이 PC의 IP>:8100` 접속 → DDS 상태가 **connected** 면 정상.
+
+### 빼먹으면 생기는 일
+
+| 단계 | 빼먹으면 |
+|---|---|
+| 1 ROS 메시지 빌드 | 연동 안 됨 (단독 모드·웹 UI는 동작) |
+| 3 `setup-audio.sh` | **소리 안 남** |
+| 3 카드 번호 확인 | **소리 안 남** |
+| 4 wav 파일 | 재생할 음원이 없음 |
+| 5 `enable` + `enable-linger` | **재부팅해도 안 뜸** |
+
+설정(`config/speaker.yaml`)은 저장소에 포함되어 도메인·그룹 값이 그대로 따라온다.
+새 PC에서 손댈 것은 **카드 번호(3)와 음원 파일(4)** 둘뿐이다.
+
+## 수동 실행
+
+```bash
+./run.sh
+```
+
+## 소리가 안 날 때
+
+```bash
+aplay -D plughw:1,0 -d 1 <아무 wav>
+```
+
+`audio open error: Device or resource busy` 가 나오면 다른 프로그램이 장치를 잡고 있다.
+범인은 거의 항상 PulseAudio다. 누가 잡고 있는지는 이렇게 본다.
+
+```bash
+fuser -v /dev/snd/*
+cat /proc/asound/card1/pcm0p/sub0/status    # state: RUNNING 이면 점유 중
+```
+
+`./deploy/setup-audio.sh` 를 실행하면 해결된다.
+앱 로그(웹 UI 하단)에는 `재생 종료(코드 1) audio open error: Device or resource busy` 로 남는다.
 
 ## 구조
 
@@ -76,7 +142,9 @@ backend/
   logbuf.py         최근 100건 링버퍼
 frontend/           순수 HTML/JS, 빌드 도구 없음
 config/speaker.yaml 설정 영속
-deploy/             systemd 유닛
+deploy/
+  speaker-app.service  systemd 유닛
+  setup-audio.sh       사운드 장치 독점 설정 (새 PC 1회)
 ```
 
 `dds_listener.py` 만 `rclpy` 를 import 한다. 나머지는 ROS를 전혀 모르므로,
